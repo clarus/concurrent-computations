@@ -1,8 +1,8 @@
 (** Experiments for the "composable monads" project. *)
-Require Import Arith.
-Require Import List.
-Require Import Streams.
-Require Import String.
+Require Import Coq.Arith.Arith.
+Require Import Coq.Lists.List.
+Require Import Coq.Lists.Streams.
+Require Import Coq.Strings.String.
 
 Import ListNotations.
 Local Open Scope string_scope.
@@ -14,7 +14,7 @@ Module Result.
   | Val : A -> t A B C
   | Err : B -> t A B C
   | Mon : C -> t A B C.
-  
+
   Arguments Val [A] [B] [C] _.
   Arguments Err [A] [B] [C] _.
   Arguments Mon [A] [B] [C] _.
@@ -29,7 +29,7 @@ Class Monad : Type := {
 Module M.
   Inductive t {m : Monad} (A : Type) : Type :=
   | new : (S -> Result.t A E (t A) * S) -> t A.
-  
+
   Definition open {m : Monad} A (x : t A) :=
     match x with
     | new x' => x'
@@ -257,25 +257,25 @@ Definition break : @M.t Breaker unit :=
 
 Fixpoint local_run_with_break {m : Monad} A (x : @M.t (Breaker ++ m) A)
   : @M.t m (A + @M.t (Breaker ++ m) A) :=
-  M.new (m := m) (fun s =>
-    match M.open x (false, s) with
-    | (r, (true, s)) =>
+  M.new (m := m) (fun i =>
+    match M.open x (false, i) with
+    | (r, (true, o)) =>
       (Val (inr (M.new (m := Breaker ++ m) (fun i =>
         (r, (false, snd i))))), o)
-    | (Val x, (false, s)) => (Val (inl x), s)
-    | (Err e, (false, s)) =>
+    | (Val x, (false, o)) => (Val (inl x), o)
+    | (Err e, (false, o)) =>
       match e with
       | inl e_break => match e_break with end
-      | inr e_m => (Err e_m, s)
+      | inr e_m => (Err e_m, o)
       end
-    | (Mon x, (false, s)) => (Mon (local_run_with_break x), s)
+    | (Mon x, (false, o)) => (Mon (local_run_with_break x), o)
     end).
 
 Fixpoint local_run_with_break_n {m : Monad} A (x : @M.t (Breaker ++ m) A) (a : @M.t m unit) (n : nat)
   : @M.t m (A + @M.t (Breaker ++ m) A) :=
   match n with
   | 0 => ret (inr x)
-  | S n' => bind (local_run_with_break x) (fun x =>
+  | Datatypes.S n' => bind (local_run_with_break x) (fun x =>
     match x with
     | inl x => ret (inl x)
     | inr x => seq a (local_run_with_break_n x a n')
@@ -301,7 +301,7 @@ Definition Waiter (m : Monad) (A B : Type) : Monad :=
 
 Module Coroutine.
   Definition t {m : Monad} (A B T : Type) := @M.t (Waiter m A B ++ m) T.
-  
+
   Definition break_if_not_fresh {m : Monad} A B : t A B unit :=
     combine_commut (gret (
       bind (m := Waiter m A B) (gret (read _)) (fun f_fresh =>
@@ -310,17 +310,17 @@ Module Coroutine.
           ret tt
         else
           combine_commut (gret break)))).
-  
+
   Definition use_and_consume {m : Monad} A B (a : A) : t A B B :=
     combine_assoc_right (gret (combine_commut (
       bind (m := m ++ State _) (gret (read _)) (fun f_fresh : _ * _ =>
         let (f, _) := f_fresh in
         seq (gret (write (f, false)))
           (combine_commut (gret (f a))))))).
-  
+
   Definition yield {m : Monad} A B (a : A) : t A B B :=
     seq (break_if_not_fresh _ _) (use_and_consume _ a).
-  
+
   (*Definition I_of_O {m : Monad} A B (o : @O (Waiter m A B)) : option (@I (Waiter m A B)) :=
     match o with
     | ((f, fresh), break) =>
@@ -329,19 +329,19 @@ Module Coroutine.
       else
         Some (f, fresh)
     end.*)
-  
+
   (*Definition inject_new_f {m : Monad} A B (f : A -> M.t B) : @M.t (State ((A -> @M.t m B) * bool)) unit :=
     write (f, true).*)
-  
+
   (*Definition force {m : Monad} A B T (x : t A B T) (f : A -> M.t B) : M.t (T + t A B T) :=
     local_run (m' := m) (local_run_with_break x) (fun o => o) (f, true).
-  
+
   Definition force {m : Monad} A B T (x : t A B T) (f : A -> M.t B) : M.t (T + t A B T) :=
     sum_id (local_run_with_break x (I_of_O (B := _)) (f, true)).
-  
+
   Definition force_n {m : Monad} A B T (x : t A B T) (n : nat) (f : A -> M.t B) : M.t (T + t A B T) :=
     sum_id (local_run_with_break_n x (I_of_O (B := _)) (f, true) n).
-  
+
   Definition terminate {m : Monad} A B T (x : t A B T) (f : A -> M.t B) : M.t T :=
     sum_id (local_run_with_break_terminate x (I_of_O (B := _)) (f, true)).
 End Coroutine.
