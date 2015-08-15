@@ -199,52 +199,53 @@ Fixpoint local_run {m m' : Monad.t} A (x : M.t (m ++ m') A) (s_m : Monad.S m)
     end).
 
 (** Breaks *)
-Definition Breaker : Monad.t := {
-  S := bool;
-  E := Empty_set }.
+Module Breaker.
+  Definition m : Monad.t :=
+    Monad.New bool Empty_set.
 
-Definition break : M.t m Breaker unit :=
-  M.New (fun _ => (Result.Val tt, true)).
+  Definition break : M.t m unit :=
+    M.New (m := m) (fun _ => (Result.Val tt, true)).
 
-Fixpoint local_run_with_break {m : Monad.t} A (x : M.t (Breaker ++ m) A)
-  : M.t m (A + M.t (Breaker ++ m) A) :=
-  M.New (m := m) (fun i =>
-    match M.open x (false, i) with
-    | (r, (true, o)) =>
-      (Result.Val (inr (M.New (m := Breaker ++ m) (fun i =>
-        (r, (false, snd i))))), o)
-    | (Result.Val x, (false, o)) => (Result.Val (inl x), o)
-    | (Result.Err e, (false, o)) =>
-      match e with
-      | inl e_break => match e_break with end
-      | inr e_m => (Result.Err e_m, o)
-      end
-    | (Result.Mon x, (false, o)) => (Result.Mon (local_run_with_break x), o)
-    end).
+  Fixpoint local_run {m' : Monad.t} {A} (x : M.t (m ++ m') A)
+    : M.t m' (A + M.t (m ++ m') A) :=
+    M.New (m := m') (fun i =>
+      match M.open x (false, i) with
+      | (r, (true, o)) =>
+        (Result.Val (inr (M.New (m := m ++ m') (fun i =>
+          (r, (false, snd i))))), o)
+      | (Result.Val x, (false, o)) => (Result.Val (inl x), o)
+      | (Result.Err e, (false, o)) =>
+        match e with
+        | inl e_break => match e_break with end
+        | inr e_m => (Result.Err e_m, o)
+        end
+      | (Result.Mon x, (false, o)) => (Result.Mon (local_run x), o)
+      end).
 
-Fixpoint local_run_with_break_n {m : Monad.t} A (x : M.t (Breaker ++ m) A) (a : M.t m unit) (n : nat)
-  : M.t m (A + M.t (Breaker ++ m) A) :=
-  match n with
-  | 0 => ret (inr x)
-  | Datatypes.S n' => bind (local_run_with_break x) (fun x =>
-    match x with
-    | inl x => ret (inl x)
-    | inr x => seq a (local_run_with_break_n x a n')
-    end)
-  end.
+  Fixpoint local_run_n {m' : Monad.t} {A} (x : M.t (m ++ m') A)
+    (a : M.t m' unit) (n : nat) : M.t m' (A + M.t (m ++ m') A) :=
+    match n with
+    | 0 => ret (inr x)
+    | Datatypes.S n' => bind (local_run x) (fun x =>
+      match x with
+      | inl x => ret (inl x)
+      | inr x => seq a (local_run_n x a n')
+      end)
+    end.
 
-Fixpoint local_run_with_break_terminate {m : Monad.t} A (x : M.t (Breaker ++ m) A) (a : M.t m unit)
-  : M.t m A :=
-  M.New (m := m) (fun i =>
-    match M.open x (tt, i) with
-    | (Result.Val x, (_, o)) => (Result.Val x, o)
-    | (Result.Err e, (_, o)) =>
-      match e with
-      | inl e_break => match e_break with end
-      | inr e_m => (Result.Err e_m, o)
-      end
-    | (Result.Mon x, (_, o)) => (Result.Mon (seq a (local_run_with_break_terminate x a)), o)
-    end).
+  Fixpoint local_run_terminate {m' : Monad.t} {A}
+    (x : M.t (m ++ m') A) (a : M.t m' unit) : M.t m' A :=
+    M.New (m := m') (fun i =>
+      match M.open x (false, i) with
+      | (Result.Val x, (_, o)) => (Result.Val x, o)
+      | (Result.Err e, (_, o)) =>
+        match e with
+        | inl e_break => match e_break with end
+        | inr e_m => (Result.Err e_m, o)
+        end
+      | (Result.Mon x, (_, o)) => (Result.Mon (seq a (local_run_terminate x a)), o)
+      end).
+End Breaker.
 
 (** Coroutines *)
 Definition Waiter (m : Monad.t) (A B : Type) : Monad.t :=
